@@ -1,0 +1,303 @@
+#lang racket/base
+(require racket/draw
+         racket/class
+         racket/cmdline
+         racket/list)
+
+;; This file needs to stand on its own in a main-distribution Racket.
+
+(provide read-and-plot)
+
+(module+ main
+  (define gui? #f)
+  (define bitmaps? #f)
+  
+  (define srcs
+    (command-line
+     #:once-each
+     [("--gui") "Launch the GUI viewer"
+      (set! gui? #t)]
+     [("-o") "Generate \".png\" alongside each <log-file>"
+      (set! bitmaps? #t)]
+     #:args
+     (log-file . another-log-file)
+     (cons log-file
+           another-log-file)))
+  
+  (read-and-plot srcs gui? bitmaps?))
+
+
+(define (read-and-plot srcs gui? bitmaps?)
+  (define (read-measurements in)
+    (let loop ([during ""] [detail ""] [r null])
+      (define l (read-line in))
+      (cond
+       [(eof-object? l) (reverse r)]
+       [(regexp-match #rx"^raco setup: version:" l)
+        ;; reset
+        (loop "" "" null)]
+       [(regexp-match #rx"^GC: 0:(?:min|MAJ) @ ([0-9,]+)K[^;]*; free ([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
+        => (lambda (m)
+             (define mem (string->number (regexp-replace* #rx"," (cadr m) "")))
+             (define less-mem (string->number (regexp-replace* #rx"," (caddr m) "")))
+             (define time (string->number (cadddr m)))
+             (unless (and mem time)
+               (error 'build-plot "parse failed: ~s" l))
+             (loop during detail
+                   (cons (list mem during time less-mem detail)
+                         r)))]
+       [(regexp-match? #rx"^raco setup: (?:making|running|(?:re-)?rendering)" l)
+        (loop l "" r)]
+       [else
+        (loop during l r)])))
+
+  (define measurementss (for/list ([src (in-list srcs)])
+                          (call-with-input-file*
+                           src
+                           read-measurements)))
+
+  (define all-measurements (apply append measurementss))
+
+  (define max-val (apply max (map car all-measurements)))
+  (define max-time (apply max (map caddr (map last measurementss))))
+
+  ;; ----------------------------------------
+
+  (define (make-graph bm w h measurements)
+    (define (x p)
+      (* w (/ (caddr p) max-time)))
+    (define (y v)
+      (- h (* h (/ v (* 1.2 max-val)))))
+    (define (y1 p) (y (car p)))
+    (define (y2 p) (y (- (car p) (cadddr p))))
+    
+    (define dc (send bm make-dc))
+    (send dc set-smoothing 'smoothed)
+    (send dc set-brush (make-brush #:style 'transparent))
+    
+    (for/fold ([during ""]) ([p (in-list measurements)])
+      (define new-during (cadr p))
+      (unless (equal? during new-during)
+        (send dc set-pen (make-pen #:color (cond
+                                            [(regexp-match? #"running" during) "cyan"]
+                                            [(regexp-match? #"re-rendering" during) "pink"]
+                                            [(regexp-match? #"rendering" during) "green"]
+                                            [else "orange"])))
+        (send dc draw-line (x p) 0 (x p) h))
+      new-during)
+    
+    (send dc set-pen (make-pen #:color "black"))
+    
+    (define p1 (new dc-path%))
+    (send p1 move-to 0 (y1 (car measurements)))
+    (for ([p (in-list measurements)])
+      (send p1 line-to (x p) (y1 p)))
+    (send dc draw-path p1 0 0)
+    
+    (define p2 (new dc-path%))
+    (send p2 move-to 0 (y2 (car measurements)))
+    (for ([p (in-list measurements)])
+      (send p2 line-to (x p) (y2 p)))
+    (send dc draw-path p2 0 0))
+
+  ;; ----------------------------------------
+
+  (when bitmaps?
+    (for ([src (in-list srcs)]
+          [measurements (in-list measurementss)])
+      (define w 800)
+      (define h 600)
+      (define bm (make-bitmap w h #f))
+      (make-graph bm w h measurements)
+      (send bm save-file (path-replace-suffix src #".png") 'png)))
+
+  ;; ----------------------------------------
+
+  (when gui?
+    ((dynamic-require (module-path-index-join
+                       '(submod "." gui)
+                       (variable-reference->module-path-index
+                        (#%variable-reference)))
+                      'start-gui)
+     srcs measurementss
+     max-time max-val make-graph)))
+
+;; ============================================================
+  
+(module* gui racket/base
+  (require (submod "..")
+           racket/gui/base
+           racket/class
+           racket/list
+           racket/format
+           racket/path)
+
+  (define (start-gui srcs measurementss
+                     max-time max-val make-graph)
+
+    (define f (new frame%
+                   [label "Memory"]
+                   [width 800]
+                   [height 600]))
+
+    (define graph-canvas%
+      (class canvas%
+        (super-new)
+        (inherit get-dc
+                 get-client-size
+                 refresh)
+        
+        (define meas-pos 0)
+        (define measurements (list-ref measurementss meas-pos))
+        
+        (define mouse-x #f)
+        (define mouse-y #f)
+        (define mouse-x1 #f)
+        (define mouse-y1 #f)
+        (define mouse-x2 #f)
+        (define mouse-y2 #f)
+        
+        (define/override (on-event e)
+          (define-values (w h) (get-client-size))
+          (define new-x (min (max 0 (send e get-x)) w))
+          (define new-y (min (max 0 (send e get-y)) h))
+          (unless (and (eqv? mouse-x new-x)
+                       (eqv? mouse-y new-y))
+            (set! mouse-x new-x)
+            (set! mouse-y new-y)
+            (refresh))
+          (cond
+           [(send e button-down? 'left)
+            (set! mouse-x1 new-x)
+            (set! mouse-x2 new-x)
+            (set! mouse-y1 new-y)
+            (set! mouse-y2 new-y)
+            (refresh)]
+           [(and (send e button-up? 'left)
+                 (eqv? mouse-x1 mouse-x2)
+                 (eqv? mouse-y1 mouse-y2))
+            (set! mouse-x1 #f)
+            (set! mouse-y1 #f)
+            (set! mouse-x2 #f)
+            (set! mouse-y2 #f)
+            (refresh)]
+           [(or (send e button-up? 'left)
+                (and (send e get-left-down)
+                     mouse-x2))
+            (unless (and (eqv? mouse-x2 new-x)
+                         (eqv? mouse-y2 new-y))
+              (set! mouse-x2 new-x)
+              (set! mouse-y2 new-y)
+              (refresh))]))
+        
+        (define/override (on-char e)
+          (define (adj d)
+            (define new-meas-pos (modulo (+ meas-pos d (length srcs))
+                                         (length srcs)))
+            (unless (= meas-pos new-meas-pos)
+              (set! meas-pos new-meas-pos)
+              (set! measurements (list-ref measurementss meas-pos))
+              (set! graph #f)
+              (refresh)))
+          (case (send e get-key-code)
+            [(left) (adj -1)]
+            [(right) (adj +1)]))
+        
+        (define graph-w 0)
+        (define graph-h 0)
+        (define graph #f)
+        
+        (define/override (on-paint)
+          (define dc (get-dc))
+          (define-values (w h) (get-client-size))
+          (define (x p)
+            (* w (/ (caddr p) max-time)))
+          
+          (unless (and graph
+                       (= w graph-w)
+                       (= h graph-h))
+            (set! graph-w w)
+            (set! graph-h h)
+            (set! graph (make-bitmap w h))
+            (make-graph graph w h measurements))
+
+          (send dc draw-bitmap graph 0 0)
+          
+          (define mouse-p
+            (and mouse-x
+                 (or (for/first ([p (in-list measurements)]
+                                 #:when ((x p) . >= . mouse-x))
+                       p)
+                     #f)))
+          
+          (define mouse-during (or (and mouse-p (cadr mouse-p))
+                                   ""))
+          (define mouse-detail (or (and mouse-p (list-ref mouse-p 4))
+                                   ""))
+          
+          (define (comma-ize s)
+            (define l (string-length s))
+            (if (l . > . 3)
+                (string-append (comma-ize (substring s 0 (- l 3)))
+                               ","
+                               (substring s (- l 3)))
+                s))
+          (define (mem-of dh)
+            (comma-ize (~r (* max-val 1.2 (/ dh h))
+                           #:precision 0)))
+          (define (time-ize n)
+            (~a (~r (quotient n (* 60 60 1000))
+                    #:min-width 1
+                    #:pad-string "0")
+                ":"
+                (~r (modulo (quotient n (* 60 1000)) 60)
+                    #:min-width 2
+                    #:pad-string "0")
+                ":"
+                (~r (/ (modulo n (* 60 1000)) 1000)
+                    #:precision 2
+                    #:min-width 5
+                    #:pad-string "0")))
+          (define (time-of dw)
+            (time-ize (floor (* max-time (/ dw w)))))
+          
+          (when mouse-x1
+            (send dc set-pen (make-pen #:color "blue"))
+            (send dc set-brush (make-brush #:color (let ([c (make-object color% "blue")])
+                                                     (make-color (send c red)
+                                                                 (send c green)
+                                                                 (send c blue)
+                                                                 0.5))))
+            (define x (min mouse-x1 mouse-x2))
+            (define y (min mouse-y1 mouse-y2))
+            (define dw (abs (- mouse-x2 mouse-x1)))
+            (define dh (abs (- mouse-y2 mouse-y1)))
+            (send dc draw-rectangle x y dw dh)
+            (send dc set-font (make-font #:size 12 #:size-in-pixels? #t #:weight 'bold))
+            (define desc (~a (mem-of dh)
+                             "K    "
+                             (time-of dw)))
+            (send dc set-text-foreground "white")
+            (send dc draw-text desc (+ x 2) (+ y 2))
+            (send dc set-text-foreground "black")
+            (send dc draw-text desc (+ x 3) (+ y 3)))
+          
+          (send dc set-font (make-font #:size 12 #:size-in-pixels? #t))
+          (send dc draw-text mouse-during 5 0)
+          (send dc draw-text mouse-detail 5 14)
+          (when mouse-x
+            (send dc draw-text (~a (mem-of (- h mouse-y))
+                                   "K"
+                                   "   "
+                                   (time-of mouse-x))
+                  5 30))
+          
+          (when (pair? (cdr srcs))
+            (define name (path->string
+                          (file-name-from-path (path-replace-suffix (list-ref srcs meas-pos) #""))))
+            (define-values (tw th td ta) (send dc get-text-extent name))
+            (send dc draw-text name (- w 5 tw) 0)))))
+
+    (void (new graph-canvas% [parent f]))
+
+    (send f show #t)))
