@@ -2,22 +2,32 @@
 (require racket/system
          "plot.rkt"
          "upload.rkt"
-         racket/future)
+         racket/future
+         plt-service-monitor/beat)
 
 (module+ main
   (require racket/cmdline)
   
+  (define beat-bucket #f)
+
   (command-line
+   #:once-each
+   [("--beat") bucket "Record heartbeat at <bucket>"
+    (set! beat-bucket bucket)]
    #:args
    (bucket)
-   (build bucket)))
-  
+   (build bucket
+          #:beat-bucket beat-bucket)))
+
 (define (system! s)
   (printf "~a\n" s)
   (unless (system s)
     (error "failed")))
 
-(define (build bucket [work-dir (current-directory)])
+(define (build bucket
+               #:work-dir [work-dir (current-directory)]
+               #:beat-bucket [beat-bucket #f]
+               #:beat-task-name [beat-task-name "build-plot"])
   (define plt-dir (build-path work-dir "plt"))
   (parameterize ([current-directory work-dir])
     (unless (directory-exists? plt-dir)
@@ -36,4 +46,7 @@
     
     (read-and-plot (list "build-log.txt") #f #t)
     
-    (upload bucket)))
+    (upload bucket)
+
+    (when beat-bucket
+      (beat beat-bucket beat-task-name))))
