@@ -23,8 +23,8 @@
 		 (h3 today-name)
 		 (img src: (~a today-name ".png"))
 		 (div "Log: "
-		      (a href: (~a today-name ".txt.gz")
-			 (~a today-name ".txt.gz"))
+		      (a href: (~a today-name ".txt")
+			 (~a today-name ".txt"))
 		      (for/list ([i 8]) nbsp)
 		      (a href: "about.html"
 			 "About and Tools"))

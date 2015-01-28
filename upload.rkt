@@ -28,7 +28,7 @@
      (gzip-through-ports i log-gz "build-log.txt" (current-seconds))))
 
   (void
-   (put/bytes (~a bucket "/" today-name ".txt.gz")
+   (put/bytes (~a bucket "/" today-name ".txt")
               (get-output-bytes log-gz)
               "text/plain; charset=utf-8"
               (hash 'x-amz-acl "public-read"

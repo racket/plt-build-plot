@@ -5,6 +5,8 @@
          racket/future
          plt-service-monitor/beat)
 
+(provide build)
+
 (module+ main
   (require racket/cmdline)
   

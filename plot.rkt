@@ -2,21 +2,22 @@
 (require racket/draw
          racket/class
          racket/cmdline
-         racket/list)
+         racket/list
+         racket/format)
 
 ;; This file needs to stand on its own in a main-distribution Racket.
 
 (provide read-and-plot)
 
 (module+ main
-  (define gui? #f)
+  (define gui? #t)
   (define bitmaps? #f)
   
   (define srcs
     (command-line
      #:once-each
-     [("--gui") "Launch the GUI viewer"
-      (set! gui? #t)]
+     [("--batch") "Suppress the GUI viewer"
+      (set! gui? #f)]
      [("-o") "Generate \".png\" alongside each <log-file>"
       (set! bitmaps? #t)]
      #:args
@@ -109,6 +110,10 @@
       (define h 600)
       (define bm (make-bitmap w h #f))
       (make-graph bm w h measurements)
+      (send (send bm make-dc)
+            draw-text
+            (~a "Peak: " (mem-str max-val) "   Duration:" (time-str max-time))
+            5 5)
       (send bm save-file (path-replace-suffix src #".png") 'png)))
 
   ;; ----------------------------------------
@@ -122,15 +127,45 @@
      srcs measurementss
      max-time max-val make-graph)))
 
+;; ----------------------------------------
+
+(define (mem-str mem)
+  (~a (comma-ize (~r mem #:precision 0))
+      "K"))
+
+(define (comma-ize s)
+  (define l (string-length s))
+  (if (l . > . 3)
+      (string-append (comma-ize (substring s 0 (- l 3)))
+                     ","
+                     (substring s (- l 3)))
+      s))
+
+(define (time-str secs)
+  (time-ize (floor secs)))
+
+(define (time-ize n)
+  (~a (~r (quotient n (* 60 60 1000))
+          #:min-width 1
+          #:pad-string "0")
+      ":"
+      (~r (modulo (quotient n (* 60 1000)) 60)
+          #:min-width 2
+          #:pad-string "0")
+      ":"
+      (~r (/ (modulo n (* 60 1000)) 1000.0)
+          #:precision '(= 2)
+          #:min-width 5
+          #:pad-string "0")))
+          
 ;; ============================================================
   
-(module* gui racket/base
-  (require (submod "..")
-           racket/gui/base
+(module* gui #f
+  (require racket/gui/base
            racket/class
-           racket/list
-           racket/format
            racket/path)
+  
+  (provide start-gui)
 
   (define (start-gui srcs measurementss
                      max-time max-val make-graph)
@@ -235,31 +270,11 @@
           (define mouse-detail (or (and mouse-p (list-ref mouse-p 4))
                                    ""))
           
-          (define (comma-ize s)
-            (define l (string-length s))
-            (if (l . > . 3)
-                (string-append (comma-ize (substring s 0 (- l 3)))
-                               ","
-                               (substring s (- l 3)))
-                s))
           (define (mem-of dh)
-            (comma-ize (~r (* max-val 1.2 (/ dh h))
-                           #:precision 0)))
-          (define (time-ize n)
-            (~a (~r (quotient n (* 60 60 1000))
-                    #:min-width 1
-                    #:pad-string "0")
-                ":"
-                (~r (modulo (quotient n (* 60 1000)) 60)
-                    #:min-width 2
-                    #:pad-string "0")
-                ":"
-                (~r (/ (modulo n (* 60 1000)) 1000)
-                    #:precision 2
-                    #:min-width 5
-                    #:pad-string "0")))
+            (mem-str (* max-val 1.2 (/ dh h))))
+
           (define (time-of dw)
-            (time-ize (floor (* max-time (/ dw w)))))
+            (time-str (* max-time (/ dw w))))
           
           (when mouse-x1
             (send dc set-pen (make-pen #:color "blue"))
@@ -275,7 +290,7 @@
             (send dc draw-rectangle x y dw dh)
             (send dc set-font (make-font #:size 12 #:size-in-pixels? #t #:weight 'bold))
             (define desc (~a (mem-of dh)
-                             "K    "
+                             "    "
                              (time-of dw)))
             (send dc set-text-foreground "white")
             (send dc draw-text desc (+ x 2) (+ y 2))
@@ -287,7 +302,6 @@
           (send dc draw-text mouse-detail 5 14)
           (when mouse-x
             (send dc draw-text (~a (mem-of (- h mouse-y))
-                                   "K"
                                    "   "
                                    (time-of mouse-x))
                   5 30))
