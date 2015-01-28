@@ -59,8 +59,14 @@
 
   (define all-measurements (apply append measurementss))
 
-  (define max-val (apply max (map car all-measurements)))
-  (define max-time (apply max (map caddr (map last measurementss))))
+  (define (get-max-val measurements)
+    (apply max (map car measurements)))
+
+  (define (get-max-time measurements) 
+    (caddr (last measurements)))
+
+  (define max-val (get-max-val all-measurements))
+  (define max-time (apply max (map get-max-time measurementss)))
 
   ;; ----------------------------------------
 
@@ -112,7 +118,8 @@
       (make-graph bm w h measurements)
       (send (send bm make-dc)
             draw-text
-            (~a "Peak: " (mem-str max-val) "   Duration:" (time-str max-time))
+            (~a "Peak: " (mem-str (get-max-val measurements))
+                "   Duration:" (time-str (get-max-time measurements)))
             5 5)
       (send bm save-file (path-replace-suffix src #".png") 'png)))
 
