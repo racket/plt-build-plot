@@ -39,7 +39,8 @@
    (put/bytes (~a bucket "/" today-name ".png")
               (file->bytes "build-log.png")
               "image/png"
-              (hash 'x-amz-acl "public-read")))
+              (hash 'x-amz-storage-class "REDUCED_REDUNDANCY"
+                    'x-amz-acl "public-read")))
 
   (define previous-names
     (let ([l (read (open-input-bytes (get/bytes (~a bucket "/latest"))))])
@@ -57,7 +58,8 @@
   (s3-web-sync "page/build-plot"
                bucket
                ""
-               #:upload? #t)
+               #:upload? #t
+               #:reduced-redundancy? #t)
 
   (void
    (put/bytes (~a bucket "/latest")
