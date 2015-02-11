@@ -279,7 +279,7 @@
                                    ""))
 
           (define mouse-mem (or (and mouse-p (list-ref mouse-p 0))
-                                ""))
+                                0))
 
           (define (max-mem-of x0 x1)
             (for/fold ([m 0]) 
@@ -296,19 +296,24 @@
             (time-str (* max-time (/ dw w))))
 
           (when mouse-x1
+            (define x (min mouse-x1 mouse-x2))
+            (define y (min mouse-y1 mouse-y2))
+            (define dw (abs (- mouse-x2 mouse-x1)))
+            (define dh (abs (- mouse-y2 mouse-y1)))
+            (send dc set-pen (make-pen #:color "blue" #:width 2))
+            (send dc draw-line x 0 x h)
+            (send dc draw-line (+ x dw) 0 (+ x dw) h)
             (send dc set-pen (make-pen #:color "blue"))
             (send dc set-brush (make-brush #:color (let ([c (make-object color% "blue")])
                                                      (make-color (send c red)
                                                                  (send c green)
                                                                  (send c blue)
                                                                  0.5))))
-            (define x (min mouse-x1 mouse-x2))
-            (define y (min mouse-y1 mouse-y2))
-            (define dw (abs (- mouse-x2 mouse-x1)))
-            (define dh (abs (- mouse-y2 mouse-y1)))
-            (send dc draw-rectangle x 0 dw h)
+            (send dc draw-rectangle x y dw dh)
             (send dc set-font (make-font #:size 12 #:size-in-pixels? #t #:weight 'bold))
             (define desc (~a (mem-str (max-mem-of x (+ x dw)))
+                             "    "
+                             (mem-of dh)
                              "    "
                              (time-of dw)))
             (send dc set-text-foreground "white")
@@ -323,7 +328,9 @@
             (send dc draw-text (~a (mem-str mouse-mem)
                                    "   "
                                    (time-of mouse-x))
-                  5 30))
+                  5 30)
+            (send dc draw-text (mem-of (- h mouse-y))
+                  (+ 5 mouse-x) (+ -10 mouse-y)))
 
           (when mouse-x
             (define p (send dc get-pen))
