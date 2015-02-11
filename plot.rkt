@@ -12,7 +12,7 @@
 (module+ main
   (define gui? #t)
   (define bitmaps? #f)
-  
+
   (define srcs
     (command-line
      #:once-each
@@ -24,7 +24,7 @@
      (log-file . another-log-file)
      (cons log-file
            another-log-file)))
-  
+
   (read-and-plot srcs gui? bitmaps?))
 
 
@@ -57,12 +57,13 @@
                            src
                            read-measurements)))
 
+
   (define all-measurements (apply append measurementss))
 
   (define (get-max-val measurements)
     (apply max (map car measurements)))
 
-  (define (get-max-time measurements) 
+  (define (get-max-time measurements)
     (caddr (last measurements)))
 
   (define max-val (get-max-val all-measurements))
@@ -77,11 +78,11 @@
       (- h (* h (/ v (* 1.2 max-val)))))
     (define (y1 p) (y (car p)))
     (define (y2 p) (y (- (car p) (cadddr p))))
-    
+
     (define dc (send bm make-dc))
     (send dc set-smoothing 'smoothed)
     (send dc set-brush (make-brush #:style 'transparent))
-    
+
     (for/fold ([during ""]) ([p (in-list measurements)])
       (define new-during (cadr p))
       (unless (equal? during new-during)
@@ -92,15 +93,15 @@
                                             [else "orange"])))
         (send dc draw-line (x p) 0 (x p) h))
       new-during)
-    
+
     (send dc set-pen (make-pen #:color "black"))
-    
+
     (define p1 (new dc-path%))
     (send p1 move-to 0 (y1 (car measurements)))
     (for ([p (in-list measurements)])
       (send p1 line-to (x p) (y1 p)))
     (send dc draw-path p1 0 0)
-    
+
     (define p2 (new dc-path%))
     (send p2 move-to 0 (y2 (car measurements)))
     (for ([p (in-list measurements)])
@@ -164,14 +165,14 @@
           #:precision '(= 2)
           #:min-width 5
           #:pad-string "0")))
-          
+
 ;; ============================================================
-  
+
 (module* gui #f
   (require racket/gui/base
            racket/class
            racket/path)
-  
+
   (provide start-gui)
 
   (define (start-gui srcs measurementss
@@ -188,17 +189,17 @@
         (inherit get-dc
                  get-client-size
                  refresh)
-        
+
         (define meas-pos 0)
         (define measurements (list-ref measurementss meas-pos))
-        
+
         (define mouse-x #f)
         (define mouse-y #f)
         (define mouse-x1 #f)
         (define mouse-y1 #f)
         (define mouse-x2 #f)
         (define mouse-y2 #f)
-        
+
         (define/override (on-event e)
           (define-values (w h) (get-client-size))
           (define new-x (min (max 0 (send e get-x)) w))
@@ -231,7 +232,7 @@
               (set! mouse-x2 new-x)
               (set! mouse-y2 new-y)
               (refresh))]))
-        
+
         (define/override (on-char e)
           (define (adj d)
             (define new-meas-pos (modulo (+ meas-pos d (length srcs))
@@ -244,17 +245,17 @@
           (case (send e get-key-code)
             [(left) (adj -1)]
             [(right) (adj +1)]))
-        
+
         (define graph-w 0)
         (define graph-h 0)
         (define graph #f)
-        
+
         (define/override (on-paint)
           (define dc (get-dc))
           (define-values (w h) (get-client-size))
           (define (x p)
             (* w (/ (caddr p) max-time)))
-          
+
           (unless (and graph
                        (= w graph-w)
                        (= h graph-h))
@@ -264,25 +265,36 @@
             (make-graph graph w h measurements))
 
           (send dc draw-bitmap graph 0 0)
-          
+
           (define mouse-p
             (and mouse-x
                  (or (for/first ([p (in-list measurements)]
                                  #:when ((x p) . >= . mouse-x))
                        p)
                      #f)))
-          
+
           (define mouse-during (or (and mouse-p (cadr mouse-p))
                                    ""))
           (define mouse-detail (or (and mouse-p (list-ref mouse-p 4))
                                    ""))
-          
+
+          (define mouse-mem (or (and mouse-p (list-ref mouse-p 0))
+                                ""))
+
+          (define (max-mem-of x0 x1)
+            (for/fold ([m 0]) 
+                      ([p (in-list measurements)]
+                       #:when ((x p) . >= . x0)
+                       #:break ((x p) . > . x1))
+              (max m (car p))))
+
+
           (define (mem-of dh)
             (mem-str (* max-val 1.2 (/ dh h))))
 
           (define (time-of dw)
             (time-str (* max-time (/ dw w))))
-          
+
           (when mouse-x1
             (send dc set-pen (make-pen #:color "blue"))
             (send dc set-brush (make-brush #:color (let ([c (make-object color% "blue")])
@@ -294,25 +306,32 @@
             (define y (min mouse-y1 mouse-y2))
             (define dw (abs (- mouse-x2 mouse-x1)))
             (define dh (abs (- mouse-y2 mouse-y1)))
-            (send dc draw-rectangle x y dw dh)
+            (send dc draw-rectangle x 0 dw h)
             (send dc set-font (make-font #:size 12 #:size-in-pixels? #t #:weight 'bold))
-            (define desc (~a (mem-of dh)
+            (define desc (~a (mem-str (max-mem-of x (+ x dw)))
                              "    "
                              (time-of dw)))
             (send dc set-text-foreground "white")
             (send dc draw-text desc (+ x 2) (+ y 2))
             (send dc set-text-foreground "black")
             (send dc draw-text desc (+ x 3) (+ y 3)))
-          
+
           (send dc set-font (make-font #:size 12 #:size-in-pixels? #t))
           (send dc draw-text mouse-during 5 0)
           (send dc draw-text mouse-detail 5 14)
           (when mouse-x
-            (send dc draw-text (~a (mem-of (- h mouse-y))
+            (send dc draw-text (~a (mem-str mouse-mem)
                                    "   "
                                    (time-of mouse-x))
                   5 30))
-          
+
+          (when mouse-x
+            (define p (send dc get-pen))
+            (send dc set-pen "red" 1 'solid)
+            (send dc draw-line mouse-x 0 mouse-x h)
+            (send dc set-pen p)
+            (void))
+
           (when (pair? (cdr srcs))
             (define name (path->string
                           (file-name-from-path (path-replace-suffix (list-ref srcs meas-pos) #""))))
