@@ -33,7 +33,7 @@
   (define plt-dir (build-path work-dir "plt"))
   (parameterize ([current-directory work-dir])
     (unless (directory-exists? plt-dir)
-      (system! "git clone https://github.com/plt/racket plt"))
+      (system! "git clone https://github.com/racket/racket plt"))
     
     (parameterize ([current-directory plt-dir])
       (system! "git clean -d -x -f")
