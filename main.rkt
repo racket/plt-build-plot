@@ -23,6 +23,7 @@
 
 (define (system! s)
   (printf "~a\n" s)
+  (flush-output)
   (unless (system s)
     (error "failed")))
 
@@ -49,6 +50,7 @@
     (read-and-plot (list "build-log.txt") #f #t)
     
     (upload bucket)
+    (flush-output)
 
     (when beat-bucket
       (beat beat-bucket beat-task-name))))
