@@ -8,10 +8,10 @@
 (provide make-page)
 
 (define www (site "www"
-		  #:url "http://racket-lang.org/"
+		  #:url "https://racket-lang.org/"
 		  #:generate? #f))
 (define build-plot (site "build-plot"
-			 #:url "http://build-plot.racket-lang.org/"
+			 #:url "https://build-plot.racket-lang.org/"
 			 #:share-from www))
 
 (define (make-page today-name previous-name)
