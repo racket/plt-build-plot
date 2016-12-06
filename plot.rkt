@@ -3,7 +3,9 @@
          racket/class
          racket/cmdline
          racket/list
-         racket/format)
+         racket/format
+         racket/port
+         net/url)
 
 ;; This file needs to stand on its own in a main-distribution Racket.
 
@@ -12,6 +14,10 @@
 (module+ main
   (define gui? #t)
   (define bitmaps? #f)
+  (define fetch? #f)
+  (define width 800)
+  (define height 600)
+
 
   (define srcs
     (command-line
@@ -20,15 +26,34 @@
       (set! gui? #f)]
      [("-o") "Generate \".png\" alongside each <log-file>"
       (set! bitmaps? #t)]
+     [("--fetch") "Fetch each <log-file> from build-plot.racket-lang.org"
+      (set! fetch? #t)]
+     [("--width") w "Set the inital width to <w>"
+      (set! width (string->number w))]
+     [("--height") h "Set the initial height to <h>"
+      (set! height (string->number h))]
      #:args
      (log-file . another-log-file)
      (cons log-file
            another-log-file)))
 
-  (read-and-plot srcs gui? bitmaps?))
+  (read-and-plot (if fetch? (map fetch srcs) srcs) gui? bitmaps? width height))
+
+(define tmp-dir (build-path (find-system-path 'temp-dir) "plt-build-plot"))
+
+(define (fetch f)
+  (unless (directory-exists? tmp-dir)
+    (make-directory tmp-dir))
+  (define fname (build-path tmp-dir f))
+  (unless (file-exists? fname)
+    (with-output-to-file fname
+      (lambda ()
+        (define u (string->url (~a "http://build-plot.racket-lang.org/" f)))
+        (call/input-url u get-pure-port (lambda (i) (copy-port i (current-output-port)))))))
+  fname)
 
 
-(define (read-and-plot srcs gui? bitmaps?)
+(define (read-and-plot srcs gui? bitmaps? [w 800] [h 600])
   (define (read-measurements in)
     (let loop ([during ""] [detail ""] [r null])
       (define l (read-line in))
@@ -113,8 +138,6 @@
   (when bitmaps?
     (for ([src (in-list srcs)]
           [measurements (in-list measurementss)])
-      (define w 800)
-      (define h 600)
       (define bm (make-bitmap w h #f))
       (make-graph bm w h measurements)
       (send (send bm make-dc)
@@ -133,7 +156,7 @@
                         (#%variable-reference)))
                       'start-gui)
      srcs measurementss
-     max-time max-val make-graph)))
+     max-time max-val make-graph w h)))
 
 ;; ----------------------------------------
 
@@ -176,12 +199,12 @@
   (provide start-gui)
 
   (define (start-gui srcs measurementss
-                     max-time max-val make-graph)
+                     max-time max-val make-graph w h)
 
     (define f (new frame%
                    [label "Memory"]
-                   [width 800]
-                   [height 600]))
+                   [width w]
+                   [height h]))
 
     (define graph-canvas%
       (class canvas%
@@ -282,7 +305,7 @@
                                 0))
 
           (define (max-mem-of x0 x1)
-            (for/fold ([m 0]) 
+            (for/fold ([m 0])
                       ([p (in-list measurements)]
                        #:when ((x p) . >= . x0)
                        #:break ((x p) . > . x1))
