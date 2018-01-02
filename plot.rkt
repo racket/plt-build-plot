@@ -62,7 +62,7 @@
        [(regexp-match #rx"^raco setup: version:" l)
         ;; reset
         (loop "" "" null)]
-       [(regexp-match #rx"^GC: 0:(?:min|MAJ) @ ([0-9,]+)K[^;]*; free ([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
+       [(regexp-match #rx"^GC: 0:(?:min|MAJ[0-9]*) @  ?([0-9,]+)K[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
         => (lambda (m)
              (define mem (string->number (regexp-replace* #rx"," (cadr m) "")))
              (define less-mem (string->number (regexp-replace* #rx"," (caddr m) "")))

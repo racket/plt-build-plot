@@ -12,6 +12,7 @@
   
   (define beat-bucket #f)
   (define log-verbose? #f)
+  (define src-catalog #f)
 
   (command-line
    #:once-each
@@ -19,11 +20,14 @@
     (set! beat-bucket bucket)]
    [("-v") "Log `raco setup -v`"
     (set! log-verbose? #t)]
+   [("--catalog") catalog "Set the source catalog"
+    (set! src-catalog catalog)]
    #:args
    ([bucket #f])
    (build bucket
           #:beat-bucket beat-bucket
-          #:log-verbose? log-verbose?)))
+          #:log-verbose? log-verbose?
+          #:catalog src-catalog)))
 
 (define (system! s)
   (printf "~a\n" s)
@@ -35,7 +39,8 @@
                #:log-verbose? [log-verbose? #f]
                #:work-dir [work-dir (current-directory)]
                #:beat-bucket [beat-bucket #f]
-               #:beat-task-name [beat-task-name "build-plot"])
+               #:beat-task-name [beat-task-name "build-plot"]
+               #:catalog [src-catalog #f])
   (define plt-dir (build-path work-dir "plt"))
   (parameterize ([current-directory work-dir])
     (unless (directory-exists? plt-dir)
@@ -53,6 +58,7 @@
       (system! (string-append
                 "env PLTSTDERR=\"debug@GC error\" make CPUS=1"
                 (if log-verbose? " PLT_SETUP_OPTIONS=-v" "")
+                (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
                 " > ../build-log.txt 2>&1")))
     
     (read-and-plot (list "build-log.txt") #f #t)
