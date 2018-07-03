@@ -12,8 +12,10 @@
 (provide read-and-plot)
 
 (module+ main
+  (define only-major? #f)
   (define gui? #t)
   (define bitmaps? #f)
+  (define svgs? #f)
   (define fetch? #f)
   (define width 800)
   (define height 600)
@@ -26,6 +28,10 @@
       (set! gui? #f)]
      [("-o") "Generate \".png\" alongside each <log-file>"
       (set! bitmaps? #t)]
+     [("--svg") "Generate \".svg\" alongside each <log-file>"
+      (set! svgs? #t)]
+     [("--only-major") "Show only major-GC points"
+      (set! only-major? #t)]
      [("--fetch") "Fetch each <log-file> from build-plot.racket-lang.org"
       (set! fetch? #t)]
      [("--width") w "Set the inital width to <w>"
@@ -37,7 +43,7 @@
      (cons log-file
            another-log-file)))
 
-  (read-and-plot (if fetch? (map fetch srcs) srcs) gui? bitmaps? width height))
+  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? width height))
 
 (define tmp-dir (build-path (find-system-path 'temp-dir) "plt-build-plot"))
 
@@ -53,7 +59,7 @@
   fname)
 
 
-(define (read-and-plot srcs gui? bitmaps? [w 800] [h 600])
+(define (read-and-plot srcs only-major? gui? bitmaps? svgs? [w 800] [h 600])
   (define (read-measurements in)
     (let loop ([during ""] [detail ""] [r null])
       (define l (read-line in))
@@ -64,14 +70,18 @@
         (loop "" "" null)]
        [(regexp-match #rx"^GC: 0:(?:min|MAJ[0-9]*) @  ?([0-9,]+)K[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
         => (lambda (m)
-             (define mem (string->number (regexp-replace* #rx"," (cadr m) "")))
-             (define less-mem (string->number (regexp-replace* #rx"," (caddr m) "")))
-             (define time (string->number (cadddr m)))
-             (unless (and mem time)
-               (error 'build-plot "parse failed: ~s" l))
-             (loop during detail
-                   (cons (list mem during time less-mem detail)
-                         r)))]
+             (cond
+               [(and only-major? (regexp-match? #rx"^GC: 0:min" l))
+                (loop during l r)]
+               [else
+                (define mem (string->number (regexp-replace* #rx"," (cadr m) "")))
+                (define less-mem (string->number (regexp-replace* #rx"," (caddr m) "")))
+                (define time (string->number (cadddr m)))
+                (unless (and mem time)
+                  (error 'build-plot "parse failed: ~s" l))
+                (loop during detail
+                      (cons (list mem during time less-mem detail)
+                            r))]))]
        [(regexp-match? #rx"^raco setup: (?:making|running|(?:re-)?rendering)" l)
         (loop l "" r)]
        [else
@@ -96,7 +106,7 @@
 
   ;; ----------------------------------------
 
-  (define (make-graph bm w h measurements)
+  (define (make-graph dc w h measurements)
     (define (x p)
       (* w (/ (caddr p) max-time)))
     (define (y v)
@@ -104,7 +114,6 @@
     (define (y1 p) (y (car p)))
     (define (y2 p) (y (- (car p) (cadddr p))))
 
-    (define dc (send bm make-dc))
     (send dc set-smoothing 'smoothed)
     (send dc set-brush (make-brush #:style 'transparent))
 
@@ -135,17 +144,34 @@
 
   ;; ----------------------------------------
 
-  (when bitmaps?
+  (define (draw-all mode)
     (for ([src (in-list srcs)]
           [measurements (in-list measurementss)])
-      (define bm (make-bitmap w h #f))
-      (make-graph bm w h measurements)
-      (send (send bm make-dc)
+      (define bm (and (eq? mode 'png) (make-bitmap w h #f)))
+      (define dc (case mode
+                   [(png) (send bm make-dc)]
+                   [(svg)
+                    (define dc (new svg-dc%
+                                    [width w]
+                                    [height h]
+                                    [output (path-replace-suffix src #".svg")]))
+                    (send dc start-doc "plot")
+                    (send dc start-page)
+                    dc]))
+      (make-graph dc w h measurements)
+      (send dc
             draw-text
             (~a "Peak: " (mem-str (get-max-val measurements))
                 "   Duration:" (time-str (get-max-time measurements)))
             5 5)
-      (send bm save-file (path-replace-suffix src #".png") 'png)))
+      (case mode
+        [(png) (send bm save-file (path-replace-suffix src #".png") 'png)]
+        [(svg)
+         (send dc end-page)
+         (send dc end-doc)])))
+
+  (when bitmaps? (draw-all 'png))
+  (when svgs? (draw-all 'svg))
 
   ;; ----------------------------------------
 
@@ -285,7 +311,7 @@
             (set! graph-w w)
             (set! graph-h h)
             (set! graph (make-bitmap w h))
-            (make-graph graph w h measurements))
+            (make-graph (send graph make-dc) w h measurements))
 
           (send dc draw-bitmap graph 0 0)
 
