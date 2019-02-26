@@ -16,10 +16,13 @@
   (define gui? #t)
   (define bitmaps? #f)
   (define svgs? #f)
+  (define pdfs? #f)
+  (define rdcs? #f)
   (define fetch? #f)
   (define width 800)
   (define height 600)
-
+  (define linewidth 1)
+  (define pen-colors '())
 
   (define srcs
     (command-line
@@ -30,6 +33,10 @@
       (set! bitmaps? #t)]
      [("--svg") "Generate \".svg\" alongside each <log-file>"
       (set! svgs? #t)]
+     [("--pdf") "Generate \".svg\" alongside each <log-file>"
+      (set! pdfs? #t)]
+     [("--rdc") "Generate \".rdc\" alongside each <log-file>"
+      (set! rdcs? #t)]
      [("--only-major") "Show only major-GC points"
       (set! only-major? #t)]
      [("--fetch") "Fetch each <log-file> from build-plot.racket-lang.org"
@@ -37,13 +44,18 @@
      [("--width") w "Set the inital width to <w>"
       (set! width (string->number w))]
      [("--height") h "Set the initial height to <h>"
-      (set! height (string->number h))]
+                   (set! height (string->number h))]
+     [("--linewidth") n "Set the pen width for the GC line"
+      (set! linewidth (string->number n))]
+     #:multi
+     [("++color") c "Set the (next) pen color for the GC line"
+      (set! pen-colors (append pen-colors (list c)))]
      #:args
      (log-file . another-log-file)
      (cons log-file
            another-log-file)))
 
-  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? width height))
+  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? pdfs? rdcs? width height linewidth pen-colors))
 
 (define tmp-dir (build-path (find-system-path 'temp-dir) "plt-build-plot"))
 
@@ -59,7 +71,7 @@
   fname)
 
 
-(define (read-and-plot srcs only-major? gui? bitmaps? svgs? [w 800] [h 600])
+(define (read-and-plot srcs only-major? gui? bitmaps? svgs? pdfs? rdcs? [w 800] [h 600] [linewidth 0] [pen-colors '()])
   (define (read-measurements in)
     (let loop ([during ""] [detail ""] [r null])
       (define l (read-line in))
@@ -106,7 +118,7 @@
 
   ;; ----------------------------------------
 
-  (define (make-graph dc w h measurements)
+  (define (make-graph dc w h color measurements)
     (define (x p)
       (* w (/ (caddr p) max-time)))
     (define (y v)
@@ -128,7 +140,7 @@
         (send dc draw-line (x p) 0 (x p) h))
       new-during)
 
-    (send dc set-pen (make-pen #:color "black"))
+    (send dc set-pen (make-pen #:color color #:width linewidth))
 
     (define p1 (new dc-path%))
     (send p1 move-to 0 (y1 (car measurements)))
@@ -146,19 +158,32 @@
 
   (define (draw-all mode)
     (for ([src (in-list srcs)]
-          [measurements (in-list measurementss)])
+          [measurements (in-list measurementss)]
+          [i (in-naturals)])
       (define bm (and (eq? mode 'png) (make-bitmap w h #f)))
       (define dc (case mode
                    [(png) (send bm make-dc)]
-                   [(svg)
-                    (define dc (new svg-dc%
-                                    [width w]
-                                    [height h]
-                                    [output (path-replace-suffix src #".svg")]))
+                   [(rdc) (new record-dc%
+                               [width w]
+                               [height h])]
+                   [(svg pdf)
+                    (define dc (case mode
+                                 [(svg)
+                                  (new svg-dc%
+                                       [width w]
+                                       [height h]
+                                       [output (path-replace-suffix src #".svg")])]
+                                 [(pdf)
+                                  (new pdf-dc%
+                                       [interactive #f]
+                                       [width w]
+                                       [height h]
+                                       [output (path-replace-suffix src #".pdf")])]))
                     (send dc start-doc "plot")
                     (send dc start-page)
                     dc]))
-      (make-graph dc w h measurements)
+      (define color (select i pen-colors))
+      (make-graph dc w h color measurements)
       (send dc
             draw-text
             (~a "Peak: " (mem-str (get-max-val measurements))
@@ -166,12 +191,19 @@
             5 5)
       (case mode
         [(png) (send bm save-file (path-replace-suffix src #".png") 'png)]
-        [(svg)
+        [(rdc) (call-with-output-file*
+                (path-replace-suffix src #".rdc")
+                #:exists 'truncate/replace
+                (lambda (o)
+                  (writeln (send dc get-recorded-datum) o)))]
+        [(svg pdf)
          (send dc end-page)
          (send dc end-doc)])))
 
   (when bitmaps? (draw-all 'png))
   (when svgs? (draw-all 'svg))
+  (when pdfs? (draw-all 'pdf))
+  (when rdcs? (draw-all 'rdc))
 
   ;; ----------------------------------------
 
@@ -182,7 +214,7 @@
                         (#%variable-reference)))
                       'start-gui)
      srcs measurementss
-     max-time max-val make-graph w h)))
+     max-time max-val make-graph w h pen-colors)))
 
 ;; ----------------------------------------
 
@@ -215,6 +247,12 @@
           #:min-width 5
           #:pad-string "0")))
 
+(define (select i pen-colors)
+  (cond
+    [(i . < . (length pen-colors)) (list-ref pen-colors i)]
+    [(null? pen-colors) "black"]
+    [else (last pen-colors)]))
+
 ;; ============================================================
 
 (module* gui #f
@@ -225,7 +263,7 @@
   (provide start-gui)
 
   (define (start-gui srcs measurementss
-                     max-time max-val make-graph w h)
+                     max-time max-val make-graph w h pen-colors)
 
     (define f (new frame%
                    [label "Memory"]
@@ -311,7 +349,7 @@
             (set! graph-w w)
             (set! graph-h h)
             (set! graph (make-bitmap w h))
-            (make-graph (send graph make-dc) w h measurements))
+            (make-graph (send graph make-dc) w h (select meas-pos pen-colors) measurements))
 
           (send dc draw-bitmap graph 0 0)
 
