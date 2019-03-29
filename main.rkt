@@ -60,9 +60,13 @@
     (if variant
         (string-append variant "-" s)
         s))
-  (define config (if racket
-                     (format "RACKET=~a" racket)
-                     ""))
+  (define config (string-append
+                  (if racket
+                      (format "RACKET=~a" racket)
+                      "")
+                  (if (equal? variant "cs")
+                      " RACKETCS_SUFFIX="
+                      "")))
   (define GC-topic (if (equal? variant "cs")
                        "GC:major"
                        "GC"))
@@ -79,8 +83,8 @@
       
       (system! (format "make -j ~a ~a ~a" (processor-count) (variant-of "base") config))
       
-      (system! (format "racket/bin/raco~a pkg config --set download-cache-max-files 10240" (or variant "")))
-      (system! (format "racket/bin/raco~a pkg config --set download-cache-max-bytes 671088640" (or variant "")))
+      (system! (format "racket/bin/raco pkg config --set download-cache-max-files 10240"))
+      (system! (format "racket/bin/raco pkg config --set download-cache-max-bytes 671088640"))
       
       (system! (string-append
                 "env PLTSTDERR=\"debug@" GC-topic " error\" make " (variant-of "in-place")
