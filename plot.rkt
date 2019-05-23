@@ -71,7 +71,9 @@
   fname)
 
 
-(define (read-and-plot srcs only-major? gui? bitmaps? svgs? pdfs? rdcs? [w 800] [h 600] [linewidth 0] [pen-colors '()])
+(define (read-and-plot srcs only-major? gui?
+                       [bitmaps? #f] [svgs? #f] [pdfs? #f] [rdcs? #f]
+                       [w 800] [h 600] [linewidth 0] [pen-colors '()])
   (define (read-measurements in)
     (let loop ([during ""] [detail ""] [r null])
       (define l (read-line in))

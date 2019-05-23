@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/system
+         racket/file
          "plot.rkt"
          "upload.rkt"
          racket/future
@@ -16,6 +17,7 @@
   (define src-catalog #f)
   (define variant #f)
   (define racket #f)
+  (define distro? #f)
 
   (command-line
    #:once-each
@@ -31,6 +33,8 @@
     (set! variant str)]
    [("--racket") exec "Choose existing `racket` to drive the build"
     (set! racket exec)]
+   [("--distro") "Build from a source distro instead of a Git checkout"
+    (set! distro? #t)]
    #:args
    ([bucket #f])
    (build bucket
@@ -39,7 +43,8 @@
           #:skip-clean? skip-clean?
           #:catalog src-catalog
           #:variant variant
-          #:racket racket)))
+          #:racket racket
+          #:distro? distro?)))
 
 (define (system! s)
   (printf "~a\n" s)
@@ -55,7 +60,8 @@
                #:beat-task-name [beat-task-name "build-plot"]
                #:catalog [src-catalog #f]
                #:variant [variant #f] ; can be "cs"
-               #:racket [racket #f])  ; can be a path for RACKET=... to makefile
+               #:racket [racket #f]  ; can be a path for RACKET=... to makefile
+               #:distro? [distro? #f])
   (define (variant-of s)
     (if variant
         (string-append variant "-" s)
@@ -70,34 +76,55 @@
   (define GC-topic (if (equal? variant "cs")
                        "GC:major"
                        "GC"))
-  
-  (define plt-dir (build-path work-dir "plt"))
-  (parameterize ([current-directory work-dir])
-    (unless (directory-exists? plt-dir)
-      (system! "git clone https://github.com/racket/racket plt"))
-    
-    (parameterize ([current-directory plt-dir])
-      (unless skip-clean?
-        (system! "git clean -d -x -f"))
-      (system! "git pull")
-      
-      (system! (format "make -j ~a ~a ~a" (processor-count) (variant-of "base") config))
-      
-      (system! (format "racket/bin/raco pkg config --set download-cache-max-files 10240"))
-      (system! (format "racket/bin/raco pkg config --set download-cache-max-bytes 671088640"))
-      
-      (system! (string-append
-                "env PLTSTDERR=\"debug@" GC-topic " error\" make " (variant-of "in-place")
-                " CPUS=1 " config
-                (if log-verbose? " PLT_SETUP_OPTIONS=-v" "")
-                (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
-                " > ../build-log.txt 2>&1")))
-    
-    (read-and-plot (list "build-log.txt") #f #t)
-    
-    (when bucket
-      (upload bucket))
-    (flush-output)
 
-    (when beat-bucket
-      (beat beat-bucket beat-task-name))))
+  (cond
+    [distro?
+     (define rkt-dir (build-path work-dir "racket"))
+     (define build-dir (build-path rkt-dir "src" "build"))
+     (make-directory* build-dir)
+     (parameterize ([current-directory build-dir])
+       (system! (string-append "../configure --enable-origtree"
+                               (if (equal? variant "cs")
+                                   " --enable-csdefault"
+                                   "")
+                               (if racket
+                                   (format " --enable-racket=~a" racket)
+                                   "")))
+       (system! "make")
+       (system! (string-append
+                 "env PLTSTDERR=\"debug@" GC-topic " error\" make install"
+                 (string-append " PLT_SETUP_OPTIONS='-j 1"
+                                (if log-verbose? " -v" "")
+                                "'")
+                 " > ../../../build-log.txt 2>&1")))]
+    [else
+     (define plt-dir (build-path work-dir "plt"))
+     (parameterize ([current-directory work-dir])
+       (unless (directory-exists? plt-dir)
+         (system! "git clone https://github.com/racket/racket plt"))
+
+       (parameterize ([current-directory plt-dir])
+         (unless skip-clean?
+           (system! "git clean -d -x -f"))
+         (system! "git pull")
+
+         (system! (format "make -j ~a ~a ~a" (processor-count) (variant-of "base") config))
+
+         (system! (format "racket/bin/raco pkg config --set download-cache-max-files 10240"))
+         (system! (format "racket/bin/raco pkg config --set download-cache-max-bytes 671088640"))
+
+         (system! (string-append
+                   "env PLTSTDERR=\"debug@" GC-topic " error\" make " (variant-of "in-place")
+                   " CPUS=1 " config
+                   (if log-verbose? " PLT_SETUP_OPTIONS=-v" "")
+                   (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
+                   " > ../build-log.txt 2>&1"))))])
+
+  (read-and-plot (list "build-log.txt") #f #t)
+
+  (when bucket
+    (upload bucket))
+  (flush-output)
+
+  (when beat-bucket
+    (beat beat-bucket beat-task-name)))
