@@ -16,6 +16,7 @@
   (define skip-clean? #f)
   (define src-catalog #f)
   (define variant #f)
+  (define machine-independent? #f)
   (define racket #f)
   (define distro? #f)
 
@@ -31,6 +32,8 @@
     (set! src-catalog catalog)]
    [("--variant") str "Choose a variant, such as `cs`"
     (set! variant str)]
+   [("-M") "Build to machine-independent bytecode"
+    (set! machine-independent? #t)]
    [("--racket") exec "Choose existing `racket` to drive the build"
     (set! racket exec)]
    [("--distro") "Build from a source distro instead of a Git checkout"
@@ -43,6 +46,7 @@
           #:skip-clean? skip-clean?
           #:catalog src-catalog
           #:variant variant
+          #:machine-independent? machine-independent?
           #:racket racket
           #:distro? distro?)))
 
@@ -60,6 +64,7 @@
                #:beat-task-name [beat-task-name "build-plot"]
                #:catalog [src-catalog #f]
                #:variant [variant #f] ; can be "cs"
+               #:machine-independent? [machine-independent? #f]
                #:racket [racket #f]  ; can be a path for RACKET=... to makefile
                #:distro? [distro? #f])
   (define (variant-of s)
@@ -77,6 +82,11 @@
                        "GC:major"
                        "GC"))
 
+  (define env-vars
+    (string-append "env PLTSTDERR=\"debug@" GC-topic " error\""))
+  (define make-build-args
+    (string-append (if machine-independent? " SETUP_MACHINE_FLAGS=-M" "")))
+
   (cond
     [distro?
      (define rkt-dir (build-path work-dir "racket"))
@@ -90,9 +100,11 @@
                                (if racket
                                    (format " --enable-racket=~a" racket)
                                    "")))
-       (system! "make")
+       (system! (format "make -j ~a" (processor-count)))
        (system! (string-append
-                 "env PLTSTDERR=\"debug@" GC-topic " error\" make install"
+                 env-vars
+                 " make install"
+                 make-build-args
                  (string-append " PLT_SETUP_OPTIONS='-j 1"
                                 (if log-verbose? " -v" "")
                                 "'")
@@ -114,8 +126,9 @@
          (system! (format "racket/bin/raco pkg config --set download-cache-max-bytes 671088640"))
 
          (system! (string-append
-                   "env PLTSTDERR=\"debug@" GC-topic " error\" make " (variant-of "in-place")
-                   " CPUS=1 " config
+                   env-vars
+                   " make " (variant-of "in-place")
+                   " CPUS=1 " config make-build-args
                    (if log-verbose? " PLT_SETUP_OPTIONS=-v" "")
                    (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
                    " > ../build-log.txt 2>&1"))))])
