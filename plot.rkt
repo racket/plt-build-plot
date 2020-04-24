@@ -18,6 +18,7 @@
   (define svgs? #f)
   (define pdfs? #f)
   (define rdcs? #f)
+  (define dest-dir #f)
   (define fetch? #f)
   (define width 800)
   (define height 600)
@@ -33,18 +34,20 @@
       (set! bitmaps? #t)]
      [("--svg") "Generate \".svg\" alongside each <log-file>"
       (set! svgs? #t)]
-     [("--pdf") "Generate \".svg\" alongside each <log-file>"
+     [("--pdf") "Generate \".pdf\" alongside each <log-file>"
       (set! pdfs? #t)]
      [("--rdc") "Generate \".rdc\" alongside each <log-file>"
       (set! rdcs? #t)]
+     [("--dest") dir "Write files to <dir>"
+      (set! dest-dir dir)]
      [("--only-major") "Show only major-GC points"
       (set! only-major? #t)]
      [("--fetch") "Fetch each <log-file> from build-plot.racket-lang.org"
       (set! fetch? #t)]
-     [("--width") w "Set the inital width to <w>"
+     [("--width") w "Set the inital width to <w>; default is 800"
       (set! width (string->number w))]
-     [("--height") h "Set the initial height to <h>"
-                   (set! height (string->number h))]
+     [("--height") h "Set the initial height to <h>; default is 600"
+      (set! height (string->number h))]
      [("--linewidth") n "Set the pen width for the GC line"
       (set! linewidth (string->number n))]
      #:multi
@@ -55,7 +58,9 @@
      (cons log-file
            another-log-file)))
 
-  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? pdfs? rdcs? width height linewidth pen-colors))
+  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? pdfs? rdcs?
+                 width height linewidth pen-colors
+                 dest-dir))
 
 (define tmp-dir (build-path (find-system-path 'temp-dir) "plt-build-plot"))
 
@@ -70,63 +75,84 @@
         (call/input-url u get-pure-port (lambda (i) (copy-port i (current-output-port)))))))
   fname)
 
+(define (get-max-val measurements)
+  (apply max (map car measurements)))
+
+(define (get-max-time measurements)
+  (caddr (last measurements)))
 
 (define (read-and-plot srcs only-major? gui?
                        [bitmaps? #f] [svgs? #f] [pdfs? #f] [rdcs? #f]
-                       [w 800] [h 600] [linewidth 0] [pen-colors '()])
+                       [w 800] [h 600] [linewidth 0] [pen-colors '()]
+                       [dest-dir #f])
+  (define (match->number s)
+    (if s
+        (string->number (regexp-replace* #rx"," s ""))
+        0))
   (define (read-measurements in)
-    (let loop ([during ""] [detail ""] [r null])
+    (let loop ([during ""] [detail ""] [r null] [peak #f])
       (define l (read-line in))
       (cond
-       [(eof-object? l) (reverse r)]
+       [(eof-object? l) (cons peak (reverse r))]
        [(regexp-match #rx"^raco setup: version:" l)
         ;; reset
-        (loop "" "" null)]
-       [(regexp-match #rx"^GC: 0:(?:min|MAJ[0-9]*) @  ?([0-9,]+)K[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
+        (loop "" "" null #f)]
+       [(regexp-match #rx"^GC: 0:(?:min|MAJ[0-9]*) @  ?([0-9,]+)K(?:[(]([+-][0-9,]+)K[)])?(?:[[]([+-][0-9,]+)K[]])?[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
         => (lambda (m)
              (cond
                [(and only-major? (regexp-match? #rx"^GC: 0:min" l))
-                (loop during l r)]
+                (loop during detail r peak)]
                [else
-                (define mem (string->number (regexp-replace* #rx"," (cadr m) "")))
-                (define less-mem (string->number (regexp-replace* #rx"," (caddr m) "")))
-                (define time (string->number (cadddr m)))
+                (define mem (+ (match->number (cadr m))
+                               ;; Add space used by JIT code, if reported:
+                               (match->number (cadddr m))))
+                (define all-mem (+ mem
+                                   ;; Add adminisrtraive overhead, if reported:
+                                   (match->number (caddr m))))
+                (define less-mem (match->number (car (cddddr m))))
+                (define time (string->number (cadr (cddddr m))))
                 (unless (and mem time)
                   (error 'build-plot "parse failed: ~s" l))
                 (loop during detail
-                      (cons (list mem during time less-mem detail)
-                            r))]))]
+                      (cons (list mem during time less-mem detail all-mem)
+                            r)
+                      peak)]))]
        [(regexp-match? #rx"^raco setup: (?:making|running|(?:re-)?rendering)" l)
-        (loop l "" r)]
+        (loop l "" r peak)]
+       [(regexp-match #rx"^GC: 0:atexit peak ([0-9,]+)K[(]([+-][0-9,]+)K[)](?:[^[;]*[[][+]([0-9,]+)K)?[^;]*; .*$" l)
+        => (lambda (m)
+             (loop during l r (+ (match->number (cadr m))
+                                 (match->number (caddr m))
+                                 (match->number (cadddr m)))))]
        [else
-        (loop during l r)])))
+        (loop during l r peak)])))
 
-  (define measurementss (for/list ([src (in-list srcs)])
-                          (call-with-input-file*
-                           src
-                           read-measurements)))
+  (define peak+measurementss (for/list ([src (in-list srcs)])
+                               (call-with-input-file*
+                                src
+                                read-measurements)))
 
 
+  (define peaks (map car peak+measurementss))
+  (define measurementss (map cdr peak+measurementss))
+  
   (define all-measurements (apply append measurementss))
 
-  (define (get-max-val measurements)
-    (apply max (map car measurements)))
-
-  (define (get-max-time measurements)
-    (caddr (last measurements)))
-
-  (define max-val (get-max-val all-measurements))
+  (define max-val (max (get-max-val all-measurements)
+                       (apply max (for/list ([peak (in-list peaks)])
+                                    (or peak 0)))))
   (define max-time (apply max (map get-max-time measurementss)))
 
   ;; ----------------------------------------
 
-  (define (make-graph dc w h color measurements)
+  (define (make-graph dc w h color peak measurements)
     (define (x p)
       (* w (/ (caddr p) max-time)))
     (define (y v)
       (- h (* h (/ v (* 1.2 max-val)))))
     (define (y1 p) (y (car p)))
     (define (y2 p) (y (- (car p) (cadddr p))))
+    (define (y5 p) (y (list-ref p 5)))
 
     (send dc set-smoothing 'smoothed)
     (send dc set-brush (make-brush #:style 'transparent))
@@ -142,6 +168,14 @@
         (send dc draw-line (x p) 0 (x p) h))
       new-during)
 
+    (send dc set-pen (make-pen #:color "darkgray" #:width linewidth))
+    
+    (define p5 (new dc-path%))
+    (send p5 move-to 0 (y5 (car measurements)))
+    (for ([p (in-list measurements)])
+      (send p5 line-to (x p) (y5 p)))
+    (send dc draw-path p5 0 0)
+
     (send dc set-pen (make-pen #:color color #:width linewidth))
 
     (define p1 (new dc-path%))
@@ -154,14 +188,23 @@
     (send p2 move-to 0 (y2 (car measurements)))
     (for ([p (in-list measurements)])
       (send p2 line-to (x p) (y2 p)))
-    (send dc draw-path p2 0 0))
+    (send dc draw-path p2 0 0)
+
+    (when peak
+      (send dc set-pen (make-pen #:color "red"))
+      (send dc draw-line 0 (y peak) w (y peak))))
 
   ;; ----------------------------------------
 
   (define (draw-all mode)
     (for ([src (in-list srcs)]
+          [peak (in-list peaks)]
           [measurements (in-list measurementss)]
           [i (in-naturals)])
+      (define dest-src (if dest-dir
+                           (let-values ([(base name dir?) (split-path src)])
+                             (build-path dest-dir name))
+                           src))
       (define bm (and (eq? mode 'png) (make-bitmap w h #f)))
       (define dc (case mode
                    [(png) (send bm make-dc)]
@@ -174,27 +217,33 @@
                                   (new svg-dc%
                                        [width w]
                                        [height h]
-                                       [output (path-replace-suffix src #".svg")])]
+                                       [output (path-replace-suffix dest-src #".svg")])]
                                  [(pdf)
-                                  (new pdf-dc%
-                                       [interactive #f]
-                                       [width w]
-                                       [height h]
-                                       [output (path-replace-suffix src #".pdf")])]))
+                                  (let ([setup (new ps-setup%)])
+                                    (send setup set-scaling 1.0 1.0)
+                                    (parameterize ([current-ps-setup setup])
+                                      (new pdf-dc%
+                                           [interactive #f]
+                                           [width w]
+                                           [height h]
+                                           [output (path-replace-suffix dest-src #".pdf")])))]))
                     (send dc start-doc "plot")
                     (send dc start-page)
                     dc]))
       (define color (select i pen-colors))
-      (make-graph dc w h color measurements)
+      (make-graph dc w h color peak measurements)
       (send dc
             draw-text
-            (~a "Peak: " (mem-str (get-max-val measurements))
+            (~a (if peak
+                    (~a "Peak: " (mem-str peak) "   ")
+                    "")
+                "Peak allocated: " (mem-str (get-max-val measurements))
                 "   Duration:" (time-str (get-max-time measurements)))
             5 5)
       (case mode
-        [(png) (send bm save-file (path-replace-suffix src #".png") 'png)]
+        [(png) (send bm save-file (path-replace-suffix dest-src #".png") 'png)]
         [(rdc) (call-with-output-file*
-                (path-replace-suffix src #".rdc")
+                (path-replace-suffix dest-src #".rdc")
                 #:exists 'truncate/replace
                 (lambda (o)
                   (writeln (send dc get-recorded-datum) o)))]
@@ -203,7 +252,7 @@
          (send dc end-doc)])))
 
   (when bitmaps? (draw-all 'png))
-  (when svgs? (draw-all 'svg))
+  (when svgs? (draw-all 'svg<))
   (when pdfs? (draw-all 'pdf))
   (when rdcs? (draw-all 'rdc))
 
@@ -215,7 +264,7 @@
                        (variable-reference->module-path-index
                         (#%variable-reference)))
                       'start-gui)
-     srcs measurementss
+     srcs peaks measurementss
      max-time max-val make-graph w h pen-colors)))
 
 ;; ----------------------------------------
@@ -264,7 +313,7 @@
 
   (provide start-gui)
 
-  (define (start-gui srcs measurementss
+  (define (start-gui srcs peaks measurementss
                      max-time max-val make-graph w h pen-colors)
 
     (define f (new frame%
@@ -280,6 +329,7 @@
                  refresh)
 
         (define meas-pos 0)
+        (define peak (list-ref peaks meas-pos))
         (define measurements (list-ref measurementss meas-pos))
 
         (define mouse-x #f)
@@ -328,6 +378,7 @@
                                          (length srcs)))
             (unless (= meas-pos new-meas-pos)
               (set! meas-pos new-meas-pos)
+              (set! peak (list-ref peaks meas-pos))
               (set! measurements (list-ref measurementss meas-pos))
               (set! graph #f)
               (refresh)))
@@ -351,7 +402,7 @@
             (set! graph-w w)
             (set! graph-h h)
             (set! graph (make-bitmap w h))
-            (make-graph (send graph make-dc) w h (select meas-pos pen-colors) measurements))
+            (make-graph (send graph make-dc) w h (select meas-pos pen-colors) peak measurements))
 
           (send dc draw-bitmap graph 0 0)
 
@@ -428,11 +479,26 @@
             (send dc set-pen p)
             (void))
 
-          (when (pair? (cdr srcs))
-            (define name (path->string
-                          (file-name-from-path (path-replace-suffix (list-ref srcs meas-pos) #""))))
-            (define-values (tw th td ta) (send dc get-text-extent name))
-            (send dc draw-text name (- w 5 tw) 0)))))
+          (define (draw-string str dy)
+            (define-values (tw th td ta) (send dc get-text-extent str))
+            (send dc draw-text str (- w 5 tw) dy)
+            (+ dy th))
+
+          (let* ([dy 0]
+                 [dy (if (pair? (cdr srcs))
+                         (draw-string (path->string
+                                       (file-name-from-path (path-replace-suffix (list-ref srcs meas-pos) #"")))
+                                      dy)
+                         dy)]
+                 [dy (if peak
+                         (draw-string (~a "Peak: " (mem-str peak))
+                                      dy)
+                         dy)]
+                 [dy (draw-string (~a "Peak allocated: " (mem-str (get-max-val measurements)))
+                                  dy)]
+                 [dy (draw-string (~a "Duration:" (time-str (get-max-time measurements)))
+                                  dy)])
+            (void dy)))))
 
     (void (new graph-canvas% [parent f]))
 

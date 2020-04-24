@@ -133,7 +133,7 @@
                    (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
                    " > ../build-log.txt 2>&1"))))])
 
-  (read-and-plot (list "build-log.txt") #f #t)
+  (read-and-plot (list "build-log.txt") #f #f #t)
 
   (when bucket
     (upload bucket))
