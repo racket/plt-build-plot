@@ -18,6 +18,7 @@
   (define svgs? #f)
   (define pdfs? #f)
   (define rdcs? #f)
+  (define pdf-one-file #f)
   (define dest-dir #f)
   (define fetch? #f)
   (define width 800)
@@ -38,6 +39,8 @@
       (set! pdfs? #t)]
      [("--rdc") "Generate \".rdc\" alongside each <log-file>"
       (set! rdcs? #t)]
+     [("--one-pdf") file "Generate \".pdf\" <file> with all plots"
+      (set! pdf-one-file file)]
      [("--dest") dir "Write files to <dir>"
       (set! dest-dir dir)]
      [("--only-major") "Show only major-GC points"
@@ -58,7 +61,8 @@
      (cons log-file
            another-log-file)))
 
-  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui? bitmaps? svgs? pdfs? rdcs?
+  (read-and-plot (if fetch? (map fetch srcs) srcs) only-major? gui?
+                 bitmaps? svgs? pdfs? rdcs? pdf-one-file
                  width height linewidth pen-colors
                  dest-dir))
 
@@ -83,6 +87,7 @@
 
 (define (read-and-plot srcs only-major? gui?
                        [bitmaps? #f] [svgs? #f] [pdfs? #f] [rdcs? #f]
+                       [pdf-one-file #f]
                        [w 800] [h 600] [linewidth 0] [pen-colors '()]
                        [dest-dir #f])
   (define (match->number s)
@@ -97,7 +102,7 @@
        [(regexp-match #rx"^raco setup: version:" l)
         ;; reset
         (loop "" "" null #f)]
-       [(regexp-match #rx"^GC: 0:(?:min|MAJ[0-9]*) @  ?([0-9,]+)K(?:[(]([+-][0-9,]+)K[)])?(?:[[]([+-][0-9,]+)K[]])?[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
+       [(regexp-match #rx"^GC: 0:(?:mIn|min|MAJ)[0-9]* @  ?([0-9,]+)K(?:[(]([+-][0-9,]+)K[)])?(?:[[]([+-][0-9,]+)K[]])?[^;]*; free  ?([-0-9,]+)K[^@]*@ ([0-9]+)$" l)
         => (lambda (m)
              (cond
                [(and only-major? (regexp-match? #rx"^GC: 0:min" l))
@@ -196,15 +201,22 @@
 
   ;; ----------------------------------------
 
-  (define (draw-all mode)
+  (define (draw-all mode [one-file #f])
+    (define one-dc #f)
     (for ([src (in-list srcs)]
           [peak (in-list peaks)]
           [measurements (in-list measurementss)]
           [i (in-naturals)])
       (define dest-src (if dest-dir
-                           (let-values ([(base name dir?) (split-path src)])
-                             (build-path dest-dir name))
-                           src))
+                           (if one-file
+                               (if (relative-path? one-file)
+                                   (build-path dest-dir one-file)
+                                   one-file)
+                               (let-values ([(base name dir?) (split-path src)])
+                                 (build-path dest-dir name)))
+                           (if one-file
+                               one-file
+                               src)))
       (define bm (and (eq? mode 'png) (make-bitmap w h #f)))
       (define dc (case mode
                    [(png) (send bm make-dc)]
@@ -212,24 +224,36 @@
                                [width w]
                                [height h])]
                    [(svg pdf)
-                    (define dc (case mode
-                                 [(svg)
-                                  (new svg-dc%
-                                       [width w]
-                                       [height h]
-                                       [output (path-replace-suffix dest-src #".svg")])]
-                                 [(pdf)
-                                  (let ([setup (new ps-setup%)])
-                                    (send setup set-scaling 1.0 1.0)
-                                    (parameterize ([current-ps-setup setup])
-                                      (new pdf-dc%
-                                           [interactive #f]
-                                           [width w]
-                                           [height h]
-                                           [output (path-replace-suffix dest-src #".pdf")])))]))
-                    (send dc start-doc "plot")
+                    (define dc
+                      (or one-dc
+                          (case mode
+                            [(svg)
+                             (new svg-dc%
+                                  [width w]
+                                  [height h]
+                                  [output (path-replace-suffix dest-src #".svg")])]
+                            [(pdf)
+                             (let ([setup (new ps-setup%)])
+                               (send setup set-scaling 1.0 1.0)
+                               (parameterize ([current-ps-setup setup])
+                                 (new pdf-dc%
+                                      [as-eps #f]
+                                      [interactive #f]
+                                      [width w]
+                                      [height h]
+                                      [output (if one-file
+                                                  dest-src
+                                                  (path-replace-suffix dest-src #".pdf"))])))])))
+                    (unless one-dc
+                      (send dc start-doc "plot")
+                      (when one-file
+                        (set! one-dc dc)))
                     (send dc start-page)
                     dc]))
+      (when one-dc
+        (define-values (sw sh) (send dc get-size))
+        (define s (min (/ sw w) (/ sh h)))
+        (send dc set-scale s s))
       (define color (select i pen-colors))
       (make-graph dc w h color peak measurements)
       (send dc
@@ -240,6 +264,14 @@
                 "Peak allocated: " (mem-str (get-max-val measurements))
                 "   Duration:" (time-str (get-max-time measurements)))
             5 5)
+      (when one-dc
+        (define (draw-string str dy)
+          (define-values (tw th td ta) (send dc get-text-extent str))
+          (send dc draw-text str (- w 5 tw) dy)
+          (+ dy th))
+        (define-values (base name dir?) (split-path src))
+        (let ([dy (draw-string (path->string (path-replace-suffix name #"")) 5)])
+          (void)))
       (case mode
         [(png) (send bm save-file (path-replace-suffix dest-src #".png") 'png)]
         [(rdc) (call-with-output-file*
@@ -249,12 +281,16 @@
                   (writeln (send dc get-recorded-datum) o)))]
         [(svg pdf)
          (send dc end-page)
-         (send dc end-doc)])))
+         (unless one-dc
+           (send dc end-doc))]))
+    (when one-dc
+      (send one-dc end-doc)))
 
   (when bitmaps? (draw-all 'png))
-  (when svgs? (draw-all 'svg<))
+  (when svgs? (draw-all 'svg))
   (when pdfs? (draw-all 'pdf))
   (when rdcs? (draw-all 'rdc))
+  (when pdf-one-file (draw-all 'pdf pdf-one-file))
 
   ;; ----------------------------------------
 
