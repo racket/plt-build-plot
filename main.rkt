@@ -60,10 +60,14 @@
                #:log-verbose? [log-verbose? #f]
                #:skip-clean? [skip-clean? #f]
                #:work-dir [work-dir (current-directory)]
-               #:beat-bucket [beat-bucket #f]
-               #:beat-task-name [beat-task-name "build-plot"]
-               #:catalog [src-catalog #f]
                #:variant [variant #f] ; can be "cs"
+               #:beat-bucket [beat-bucket #f]
+               #:beat-task-name [beat-task-name (string-append
+                                                 "build-plot"
+                                                 (if variant
+                                                     (string-append "-" variant)
+                                                     ""))]
+               #:catalog [src-catalog #f]
                #:machine-independent? [machine-independent? #f]
                #:racket [racket #f]  ; can be a path for RACKET=... to makefile
                #:distro? [distro? #f])
