@@ -30,7 +30,7 @@
     (set! skip-clean? #t)]
    [("--catalog") catalog "Set the source catalog"
     (set! src-catalog catalog)]
-   [("--variant") str "Choose a variant, such as `cs`"
+   [("--variant") str "Choose a variant, such as `cs` or `bc`"
     (set! variant str)]
    [("-M") "Build to machine-independent bytecode"
     (set! machine-independent? #t)]
@@ -60,7 +60,7 @@
                #:log-verbose? [log-verbose? #f]
                #:skip-clean? [skip-clean? #f]
                #:work-dir [work-dir (current-directory)]
-               #:variant [variant #f] ; can be "cs"
+               #:variant [variant #f] ; can be "cs" or "bc"
                #:beat-bucket [beat-bucket #f]
                #:beat-task-name [beat-task-name (string-append
                                                  "build-plot"
@@ -81,6 +81,9 @@
                       "")
                   (if (equal? variant "cs")
                       " RACKETCS_SUFFIX="
+                      "")
+                  (if (equal? variant "bc")
+                      " RACKETBC_SUFFIX="
                       "")))
   (define GC-topic (if (equal? variant "cs")
                        "GC:major"
@@ -100,6 +103,9 @@
        (system! (string-append "../configure --enable-origtree"
                                (if (equal? variant "cs")
                                    " --enable-csdefault"
+                                   "")
+                               (if (equal? variant "bc")
+                                   " --enable-bcdefault"
                                    "")
                                (if racket
                                    (format " --enable-racket=~a" racket)
