@@ -80,7 +80,7 @@
   fname)
 
 (define (get-max-val measurements)
-  (apply max (map car measurements)))
+  (apply max (filter-map car measurements)))
 
 (define (get-max-time measurements)
   (caddr (last measurements)))
@@ -112,7 +112,7 @@
                                ;; Add space used by JIT code, if reported:
                                (match->number (cadddr m))))
                 (define all-mem (+ mem
-                                   ;; Add adminisrtraive overhead, if reported:
+                                   ;; Add administrative overhead, if reported:
                                    (match->number (caddr m))))
                 (define less-mem (match->number (car (cddddr m))))
                 (define time (string->number (cadr (cddddr m))))
@@ -122,7 +122,14 @@
                       (cons (list mem during time less-mem detail all-mem)
                             r)
                       peak)]))]
-       [(regexp-match? #rx"^raco setup: (?:making|running|(?:re-)?rendering)" l)
+       [(regexp-match #rx"^(raco setup: (?:[0-9]+ )?(?:making|running|(?:re-)?rendering).*) @ ([0-9]+)$" l)
+        => (lambda (m)
+             (define during (cadr m))
+             (define time (string->number (caddr m)))
+             (loop during ""
+                   (cons (list #f during time #f "") r)
+                   peak))]
+       [(regexp-match? #rx"^raco setup: (?:[0-9]+ )?(?:making|running|(?:re-)?rendering)" l)
         (loop l "" r peak)]
        [(regexp-match #rx"^GC: 0:atexit peak ([0-9,]+)K[(]([+-][0-9,]+)K[)](?:[^[;]*[[][+]([0-9,]+)K)?[^;]*; .*$" l)
         => (lambda (m)
@@ -176,23 +183,35 @@
     (send dc set-pen (make-pen #:color "darkgray" #:width linewidth))
     
     (define p5 (new dc-path%))
-    (send p5 move-to 0 (y5 (car measurements)))
+    (define first-measurement
+      (let loop ([measurements measurements])
+        (cond
+          [(null? measurements) #f]
+          [(not (caar measurements)) (loop (cdr measurements))]
+          [else (car measurements)])))
+    (when first-measurement
+      (send p5 move-to 0 (y5 first-measurement)))
     (for ([p (in-list measurements)])
-      (send p5 line-to (x p) (y5 p)))
+      (when (car p)
+        (send p5 line-to (x p) (y5 p))))
     (send dc draw-path p5 0 0)
 
     (send dc set-pen (make-pen #:color color #:width linewidth))
 
     (define p1 (new dc-path%))
-    (send p1 move-to 0 (y1 (car measurements)))
+    (when first-measurement
+      (send p1 move-to 0 (y1 first-measurement)))
     (for ([p (in-list measurements)])
-      (send p1 line-to (x p) (y1 p)))
+      (when (car p)
+        (send p1 line-to (x p) (y1 p))))
     (send dc draw-path p1 0 0)
 
     (define p2 (new dc-path%))
-    (send p2 move-to 0 (y2 (car measurements)))
+    (when first-measurement
+      (send p2 move-to 0 (y2 first-measurement)))
     (for ([p (in-list measurements)])
-      (send p2 line-to (x p) (y2 p)))
+      (when (car p)
+        (send p2 line-to (x p) (y2 p))))
     (send dc draw-path p2 0 0)
 
     (when peak
@@ -442,19 +461,23 @@
 
           (send dc draw-bitmap graph 0 0)
 
-          (define mouse-p
+          (define (find-mouse #:with-memory? [with-memory? #f])
             (and mouse-x
                  (or (for/first ([p (in-list measurements)]
+                                 #:when (or (not with-memory?)
+                                            (car p))
                                  #:when ((x p) . >= . mouse-x))
                        p)
                      #f)))
+          (define mouse-p (find-mouse))
+          (define mouse-mem-p (find-mouse #:with-memory? #t))
 
           (define mouse-during (or (and mouse-p (cadr mouse-p))
                                    ""))
           (define mouse-detail (or (and mouse-p (list-ref mouse-p 4))
                                    ""))
 
-          (define mouse-mem (or (and mouse-p (list-ref mouse-p 0))
+          (define mouse-mem (or (and mouse-mem-p (list-ref mouse-mem-p 0))
                                 0))
 
           (define (max-mem-of x0 x1)

@@ -17,6 +17,7 @@
   (define src-catalog #f)
   (define variant #f)
   (define machine-independent? #f)
+  (define no-gc? #f)
   (define racket #f)
   (define distro? #f)
 
@@ -34,6 +35,8 @@
     (set! variant str)]
    [("-M") "Build to machine-independent bytecode"
     (set! machine-independent? #t)]
+   [("--no-gc") "Disable GCs that are forced by `raco setup`"
+    (set! no-gc? #t)]
    [("--racket") exec "Choose existing `racket` to drive the build"
     (set! racket exec)]
    [("--distro") "Build from a source distro instead of a Git checkout"
@@ -47,6 +50,7 @@
           #:catalog src-catalog
           #:variant variant
           #:machine-independent? machine-independent?
+          #:no-gc? no-gc?
           #:racket racket
           #:distro? distro?)))
 
@@ -69,6 +73,7 @@
                                                      ""))]
                #:catalog [src-catalog #f]
                #:machine-independent? [machine-independent? #f]
+               #:no-gc? [no-gc? #f]
                #:racket [racket #f]  ; can be a path for RACKET=... to makefile
                #:distro? [distro? #f])
   (define (variant-of s)
@@ -90,7 +95,11 @@
                        "GC"))
 
   (define env-vars
-    (string-append "env PLTSTDERR=\"debug@" GC-topic " error\""))
+    (string-append
+     "env"
+     " PLTSTDERR=\"debug@" GC-topic " error\""
+     " PLT_SETUP_SHOW_TIMESTAMPS=enabled"
+     (if no-gc? " PLT_SETUP_NO_FORCE_GC=enabled" "")))
   (define make-build-args
     (string-append (if machine-independent? " SETUP_MACHINE_FLAGS=-M" "")))
 
