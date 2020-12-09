@@ -484,6 +484,7 @@
             (for/fold ([m 0])
                       ([p (in-list measurements)]
                        #:when ((x p) . >= . x0)
+                       #:when (cdr p)
                        #:break ((x p) . > . x1))
               (max m (car p))))
 

@@ -59,6 +59,9 @@
 		 (p "The upward slant in the blue region is not a leak;"
 		    " the " ldquo "running" rdquo " phase accumulates"
 		    " cross-reference information across documents.")
+		 (p "The (smaller) upward slant in the orange region is also not a leak;"
+		    " the " ldquo "making" rdquo " phase uses caches"
+		    " that increase in size during the build.")
 		 (p "Using "  (tt (a href: "plot.rkt" "plot.rkt")) ","
                     " you can generate graphs from the (unzipped) logs,"
                     " show in them in a GUI that provides more detail"
