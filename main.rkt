@@ -20,6 +20,8 @@
   (define no-gc? #f)
   (define racket #f)
   (define distro? #f)
+  (define for-pkgs #f)
+  (define available-plots '())
 
   (command-line
    #:once-each
@@ -41,6 +43,17 @@
     (set! racket exec)]
    [("--distro") "Build from a source distro instead of a Git checkout"
     (set! distro? #t)]
+   [("--pkgs") pkgs "Build only <pkgs> instead of main-distribution"
+    (set! for-pkgs pkgs)]
+   [("--available") file "Read list of `(<desc> <url>)` from <file>"
+    (define l (call-with-input-file* file read))
+    (unless (and (list? l) (andmap (lambda (e) (and (list? e)
+                                                    (= 2 (length e))
+                                                    (string? (car e))
+                                                    (string? (cadr e))))
+                                   l))
+      (raise-user-error 'plt-build-plot "ill-formed list of available plots in ~s" file))
+    (set! available-plots l)]
    #:args
    ([bucket #f])
    (build bucket
@@ -52,7 +65,9 @@
           #:machine-independent? machine-independent?
           #:no-gc? no-gc?
           #:racket racket
-          #:distro? distro?)))
+          #:distro? distro?
+          #:for-pkgs for-pkgs
+          #:available-plots available-plots)))
 
 (define (system! s)
   (printf "~a\n" s)
@@ -75,7 +90,9 @@
                #:machine-independent? [machine-independent? #f]
                #:no-gc? [no-gc? #f]
                #:racket [racket #f]  ; can be a path for RACKET=... to makefile
-               #:distro? [distro? #f])
+               #:distro? [distro? #f]
+               #:for-pkgs [for-pkgs #f]
+               #:available-plots [available-plots '()])
   (define (variant-of s)
     (if variant
         (string-append variant "-" s)
@@ -149,13 +166,14 @@
                    " make " (variant-of "in-place")
                    " CPUS=1 " config make-build-args
                    (if log-verbose? " PLT_SETUP_OPTIONS=-v" "")
+                   (if for-pkgs (format " PKGS=\"~a\"" for-pkgs) "")
                    (if src-catalog (format " SRC_CATALOG=~s" src-catalog) "")
                    " > ../build-log.txt 2>&1"))))])
 
   (read-and-plot (list "build-log.txt") #f #f #t)
 
   (when bucket
-    (upload bucket))
+    (upload bucket #:available-plots available-plots))
   (flush-output)
 
   (when beat-bucket

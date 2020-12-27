@@ -14,7 +14,8 @@
 			 #:url "https://build-plot.racket-lang.org/"
 			 #:share-from www))
 
-(define (make-page today-name previous-name)
+(define (make-page today-name previous-name
+                   #:available-plots [available-plots '()])
   (page #:site build-plot
 	#:file (~a today-name ".html")
 	#:title "Racket Build Plot"
@@ -37,39 +38,62 @@
   (page #:site build-plot
 	#:file "about.html"
 	#:title "Racket Build Plot - About and Tools"
-	(columns 10
-		 #:row? #t
-		 (h3 "Racket Build Plots - About and Tools")
-		 (p "Each plot depicts memory use during"
-		    " the " (tt "raco setup -j 1") " part of installing"
-		    " " (tt "main-distribution") 
-		    " plus " (tt "main-distribution-test")
-		    " in minimal Racket.")
-		 (p "The X-direction is CPU time."
-		    " The Y-direction for the black line is"
-		    " memory use sampled at each GC (before and after"
-		    " as separate lines, but you can't usually see distinct"
-		    " lines). Each color vertical line corresponds to a"
-		    " printout from " (tt "raco setup" ":"))
-		 (ul
-		  (li blt "orange = " ldquo "making" rdquo " (a collection)")
-		  (li blt "blue = " ldquo "running" rdquo " (a document)")
-		  (li blt "green = " ldquo "rendering" rdquo " (a document)")
-		  (li blt "pink = " ldquo "re-rendering" rdquo " (a document)"))
-		 (p "The upward slant in the blue region is not a leak;"
-		    " the " ldquo "running" rdquo " phase accumulates"
-		    " cross-reference information across documents.")
-		 (p "The (smaller) upward slant in the orange region is also not a leak;"
-		    " the " ldquo "making" rdquo " phase uses caches"
-		    " that increase in size during the build.")
-		 (p "Using "  (tt (a href: "plot.rkt" "plot.rkt")) ","
-                    " you can generate graphs from the (unzipped) logs,"
-                    " show in them in a GUI that provides more detail"
-                    " (such as the printouts correcting to the color lines),"
-		    " and compare multiple plots."
-		    " Use the " (tt "-h") " flag of " (tt "plot.rkt") " for more information.")))
+	(apply columns 10
+               #:row? #t
+               (h3 "Racket Build Plots - About and Tools")
+               (p "Each plot depicts memory use during"
+                  " the " (tt "raco setup -j 1") " part of installing"
+                  " " (tt "main-distribution") 
+                  " plus " (tt "main-distribution-test")
+                  " in minimal Racket.")
+               (p "The X-direction is CPU time."
+                  " The Y-direction for the black line is"
+                  " memory use sampled at each GC (before and after"
+                  " as separate lines, but you can't usually see distinct"
+                  " lines). Each color vertical line corresponds to a"
+                  " printout from " (tt "raco setup" ":"))
+               (ul
+                (li blt "orange = " ldquo "making" rdquo " (a collection)")
+                (li blt "blue = " ldquo "running" rdquo " (a document)")
+                (li blt "green = " ldquo "rendering" rdquo " (a document)")
+                (li blt "pink = " ldquo "re-rendering" rdquo " (a document)"))
+               (p "The upward slant in the blue region is not a leak;"
+                  " the " ldquo "running" rdquo " phase accumulates"
+                  " cross-reference information across documents.")
+               (p "The (smaller) upward slant in the orange region is also not a leak;"
+                  " the " ldquo "making" rdquo " phase uses caches"
+                  " that increase in size (toward some limit) during the build.")
+               (p "Using "  (tt (a href: "plot.rkt" "plot.rkt")) ","
+                  " you can generate graphs from the (unzipped) logs,"
+                  " show in them in a GUI that provides more detail"
+                  " (such as the printouts correcting to the color lines),"
+                  " and compare multiple plots."
+                  " Use the " (tt "-h") " flag of " (tt "plot.rkt") " for more information.")
+               (if (null? available-plots)
+                   null
+                   (list
+                    (h3 "Available Plots")
+                    (apply ul
+                           (for/list ([ap (in-list available-plots)])
+                             (li blt (a href: (cadr ap) (car ap)))))))))
 
   (make-directory* "page")
   (parameterize ([current-directory "page"])
     (call-with-registered-roots
      render-all)))
+
+(module+ main
+  (require racket/cmdline)
+  
+  (define available-plots '())
+  
+  (command-line
+   #:once-each
+   [("--available") file "Read list of `(<desc> <url>)` from <file>"
+    (set! available-plots (call-with-input-file* file read))]
+   #:args
+   ()
+   (void))
+  
+  (make-page "today" "yesterday"
+             #:available-plots available-plots))

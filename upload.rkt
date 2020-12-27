@@ -12,7 +12,8 @@
 
 (define-runtime-path plot-rkt "plot.rkt")
 
-(define (upload bucket)
+(define (upload bucket
+                #:available-plots [available-plots '()])
   (define today-name
     (let ([d (seconds->date (current-seconds) #f)])
       (~a (date-year d)
@@ -48,7 +49,8 @@
 
   (make-page today-name
              (and (pair? previous-names)
-                  (car previous-names)))
+                  (car previous-names))
+             #:available-plots available-plots)
   (copy-file (build-path "page" "build-plot" (~a today-name ".html"))
              (build-path "page" "build-plot" "index.html")
              #t)
