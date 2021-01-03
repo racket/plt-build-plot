@@ -47,22 +47,34 @@
                   " plus " (tt "main-distribution-test")
                   " in minimal Racket.")
                (p "The X-direction is CPU time."
-                  " The Y-direction for the black line is"
-                  " memory use sampled at each GC (before and after"
-                  " as separate lines, but you can't usually see distinct"
-                  " lines). Each color vertical line corresponds to a"
+                  " Each color vertical line corresponds to a"
                   " printout from " (tt "raco setup" ":"))
                (ul
                 (li blt "orange = " ldquo "making" rdquo " (a collection)")
                 (li blt "blue = " ldquo "running" rdquo " (a document)")
                 (li blt "green = " ldquo "rendering" rdquo " (a document)")
                 (li blt "pink = " ldquo "re-rendering" rdquo " (a document)"))
-               (p "The upward slant in the blue region is not a leak;"
+               (p "The Y-direction for the black line is"
+                  " memory use sampled at each garbage collection; before and after"
+                  " are separate lines, but you can't usually see distinct"
+                  " lines if minor collections are rendered, which is the"
+                  " default for Racket BC. The gray line just above the"
+                  " black line is total memory with collector overhead"
+                  " just before a collection, so it's a truer measure of total memory use."
+                  " The red line (parallel to the X-axis) shows peak memory"
+                  " use including collector overhead; that peeak can occur in between"
+                  " collections, but it should be fairly close to the gray line's peak.")
+               (p "By default, a garbage collection is forced at the start"
+                  " of compiling each collection and running or rendering each document."
+                  " In that configuration, the black line will tend to"
+                  " return a live-memory baseline value frequently, which reduces"
+                  " overall memory use at the expense of some time."
+                  " A slight upward slant  for that baseline in the orange region"
+                  " is not necessarily a leak; the " ldquo "making" rdquo " phase uses caches"
+                  " that increase in size (toward some limit) during the build."
+                  " An upward slant in the blue region is also not a leak;"
                   " the " ldquo "running" rdquo " phase accumulates"
                   " cross-reference information across documents.")
-               (p "The (smaller) upward slant in the orange region is also not a leak;"
-                  " the " ldquo "making" rdquo " phase uses caches"
-                  " that increase in size (toward some limit) during the build.")
                (p "Using "  (tt (a href: "plot.rkt" "plot.rkt")) ","
                   " you can generate graphs from the (unzipped) logs,"
                   " show in them in a GUI that provides more detail"
