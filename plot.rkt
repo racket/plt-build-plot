@@ -173,9 +173,9 @@
       (define new-during (cadr p))
       (unless (equal? during new-during)
         (send dc set-pen (make-pen #:color (cond
-                                            [(regexp-match? #"running" during) "cyan"]
-                                            [(regexp-match? #"re-rendering" during) "pink"]
-                                            [(regexp-match? #"rendering" during) "green"]
+                                            [(regexp-match? #"running" new-during) "cyan"]
+                                            [(regexp-match? #"re-rendering" new-during) "pink"]
+                                            [(regexp-match? #"rendering" new-during) "green"]
                                             [else "orange"])))
         (send dc draw-line (x p) 0 (x p) h))
       new-during)
